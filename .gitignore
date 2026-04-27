@@ -1,0 +1,6 @@
+steps/*.md
+*.env
+*.sh
+*.json
+*.log
+

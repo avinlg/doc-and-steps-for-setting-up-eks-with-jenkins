@@ -1,6 +1,6 @@
-steps/*.md
-*.env
+steps/*
+*.env*
 *.sh
 *.json
 *.log
-
+*.deb

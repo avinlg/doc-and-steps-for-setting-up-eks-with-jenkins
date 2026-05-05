@@ -66,76 +66,11 @@ aws ec2 authorize-security-group-ingress \
   ]"
 ```
 
-## 2.3 EKS Node Security Group
+> **Note:** There is no separately-created "node" security group. EKS auto-creates a **cluster security group** when the cluster is created and attaches it to both the control plane ENIs and the worker node ENIs. ALB→node, RDS-from-node, and similar rules are added to that auto-created SG in [04-eks-cluster.md](04-eks-cluster.md) once its ID is known.
 
-Allows node-to-node traffic and HTTP/HTTPS from the ALB:
+## 2.3 EKS Control Plane Security Group
 
-```bash
-NODE_SG_ID=$(aws ec2 create-security-group \
-  --region $REGION \
-  --group-name ${PREFIX}-node-sg \
-  --description "EKS worker nodes security group for ${PREFIX}" \
-  --vpc-id $VPC_ID \
-  --query 'GroupId' \
-  --output text)
-
-echo "NODE_SG_ID=$NODE_SG_ID"
-```
-
-Node-to-node (all traffic):
-
-```bash
-aws ec2 authorize-security-group-ingress \
-  --region $REGION \
-  --group-id $NODE_SG_ID \
-  --ip-permissions "[
-    {
-      \"IpProtocol\":\"-1\",
-      \"UserIdGroupPairs\":[
-        {\"GroupId\":\"$NODE_SG_ID\",\"Description\":\"Node to node traffic\"}
-      ]
-    }
-  ]"
-```
-
-ALB to nodes (HTTP/HTTPS):
-
-```bash
-aws ec2 authorize-security-group-ingress \
-  --region $REGION \
-  --group-id $NODE_SG_ID \
-  --ip-permissions "[
-    {
-      \"IpProtocol\":\"tcp\",
-      \"FromPort\":80,
-      \"ToPort\":80,
-      \"UserIdGroupPairs\":[
-        {\"GroupId\":\"$ALB_SG_ID\",\"Description\":\"HTTP from ALB\"}
-      ]
-    },
-    {
-      \"IpProtocol\":\"tcp\",
-      \"FromPort\":443,
-      \"ToPort\":443,
-      \"UserIdGroupPairs\":[
-        {\"GroupId\":\"$ALB_SG_ID\",\"Description\":\"HTTPS from ALB\"}
-      ]
-    }
-  ]"
-```
-
-Jenkins to node SG (for kubectl API access):
-
-```bash
-aws ec2 authorize-security-group-ingress \
-  --region $REGION \
-  --group-id $NODE_SG_ID \
-  --ip-permissions "IpProtocol=tcp,FromPort=443,ToPort=443,UserIdGroupPairs=[{GroupId=${JENKINS_SG_ID}}]"
-```
-
-## 2.4 EKS Control Plane Security Group
-
-A dedicated SG attached to the EKS cluster that allows inbound HTTPS from Jenkins and worker nodes:
+A dedicated SG attached to the EKS cluster that allows inbound HTTPS from Jenkins:
 
 ```bash
 CONTROL_PLANE_SG_ID=$(aws ec2 create-security-group \
@@ -155,12 +90,9 @@ aws ec2 authorize-security-group-ingress \
   --region $REGION \
   --group-id $CONTROL_PLANE_SG_ID \
   --ip-permissions "IpProtocol=tcp,FromPort=443,ToPort=443,UserIdGroupPairs=[{GroupId=${JENKINS_SG_ID},Description='Jenkins to EKS control plane'}]"
-
-aws ec2 authorize-security-group-ingress \
-  --region $REGION \
-  --group-id $CONTROL_PLANE_SG_ID \
-  --ip-permissions "IpProtocol=tcp,FromPort=443,ToPort=443,UserIdGroupPairs=[{GroupId=${NODE_SG_ID},Description='EKS nodes to control plane'}]"
 ```
+
+> **Note:** Communication between the EKS-managed cluster SG (attached to nodes) and the control plane is handled by EKS automatically; no rule for that is needed here.
 
 ## Summary
 
@@ -168,8 +100,8 @@ aws ec2 authorize-security-group-ingress \
 |---|---|
 | `<PREFIX>-alb-sg` | 80/443 from `0.0.0.0/0` |
 | `<PREFIX>-jenkins-sg` | 8080 from ALB SG |
-| `<PREFIX>-node-sg` | All traffic from self, 80/443 from ALB SG, 443 from Jenkins SG |
-| `<PREFIX>-eks-control-plane-sg` | 443 from Jenkins SG, 443 from Node SG |
+| `<PREFIX>-eks-control-plane-sg` | 443 from Jenkins SG |
+| EKS-managed cluster SG (created in step 4) | 80/443 from ALB SG (added in step 4) |
 
 ## Save Variables
 
@@ -179,7 +111,6 @@ cat >> eks_env.sh <<EOF
 # Step 2: Security Groups
 export ALB_SG_ID=$ALB_SG_ID
 export JENKINS_SG_ID=$JENKINS_SG_ID
-export NODE_SG_ID=$NODE_SG_ID
 export CONTROL_PLANE_SG_ID=$CONTROL_PLANE_SG_ID
 EOF
 echo "Variables saved to eks_env.sh"

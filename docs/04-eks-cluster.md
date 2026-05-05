@@ -51,6 +51,46 @@ aws eks describe-cluster \
   --output table
 ```
 
+### Fetch the EKS-Managed Cluster Security Group
+
+EKS auto-creates a **cluster security group** during `create-cluster` and attaches it to the control plane ENIs. When the managed node group is created (§4.6) the same SG is also attached to every worker node ENI. This is where ALB→node and RDS-from-node rules belong.
+
+```bash
+export CLUSTER_SG_ID=$(aws eks describe-cluster \
+  --region $REGION \
+  --name $CLUSTER_NAME \
+  --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' \
+  --output text)
+
+echo "CLUSTER_SG_ID=$CLUSTER_SG_ID"
+```
+
+Authorize the ALB to reach pods on worker nodes (HTTP/HTTPS to the node ENIs, used by ALB target health checks and traffic to `target-type: ip` pod targets):
+
+```bash
+aws ec2 authorize-security-group-ingress \
+  --region $REGION \
+  --group-id $CLUSTER_SG_ID \
+  --ip-permissions "[
+    {
+      \"IpProtocol\":\"tcp\",
+      \"FromPort\":80,
+      \"ToPort\":80,
+      \"UserIdGroupPairs\":[
+        {\"GroupId\":\"$ALB_SG_ID\",\"Description\":\"HTTP from ALB\"}
+      ]
+    },
+    {
+      \"IpProtocol\":\"tcp\",
+      \"FromPort\":443,
+      \"ToPort\":443,
+      \"UserIdGroupPairs\":[
+        {\"GroupId\":\"$ALB_SG_ID\",\"Description\":\"HTTPS from ALB\"}
+      ]
+    }
+  ]"
+```
+
 ## 4.3 Enable API Access Mode
 
 Switch from `CONFIG_MAP` to `API_AND_CONFIG_MAP` for EKS access entries:
@@ -407,6 +447,7 @@ cat >> eks_env.sh <<EOF
 
 # Step 4: EKS Cluster
 export NODEGROUP_NAME=$NODEGROUP_NAME
+export CLUSTER_SG_ID=$CLUSTER_SG_ID
 export OIDC_ISSUER=$OIDC_ISSUER
 export OIDC_ID=$OIDC_ID
 export OIDC_DOMAIN=$OIDC_DOMAIN

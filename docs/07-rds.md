@@ -78,7 +78,7 @@ echo "SHARED_RDS_SG_ID=$SHARED_RDS_SG_ID"
 aws ec2 authorize-security-group-ingress \
   --region $REGION \
   --group-id $SHARED_RDS_SG_ID \
-  --ip-permissions "IpProtocol=tcp,FromPort=3306,ToPort=3306,UserIdGroupPairs=[{GroupId=${NODE_SG_ID},Description='EKS nodes to shared RDS'}]"
+  --ip-permissions "IpProtocol=tcp,FromPort=3306,ToPort=3306,UserIdGroupPairs=[{GroupId=${CLUSTER_SG_ID},Description='EKS nodes (cluster SG) to shared RDS'}]"
 
 aws ec2 authorize-security-group-ingress \
   --region $REGION \
@@ -86,7 +86,7 @@ aws ec2 authorize-security-group-ingress \
   --ip-permissions "IpProtocol=tcp,FromPort=3306,ToPort=3306,UserIdGroupPairs=[{GroupId=${JENKINS_SG_ID},Description='Jenkins EC2 to shared RDS'}]"
 ```
 
-> **Note:** You may also need to allow the EKS cluster security group (the auto-created one) if pods connect to RDS through the cluster SG rather than the node SG.
+> **Note:** `CLUSTER_SG_ID` is the EKS-managed cluster security group fetched in step 4; it is attached to every worker node ENI, so pod egress to RDS originates from this SG.
 
 ## 7.3 DB Subnet Group
 

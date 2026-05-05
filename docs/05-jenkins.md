@@ -140,6 +140,17 @@ aws ssm start-session \
 Inside the session:
 
 ```bash
+# Allow ec2-user and the SSM session user to run docker without sudo.
+# ssm-user is created on first SSM session; ensure it exists, then add both.
+sudo getent group docker >/dev/null || sudo groupadd docker
+id -u ssm-user >/dev/null 2>&1 || sudo useradd -m ssm-user
+sudo usermod -aG docker ec2-user
+sudo usermod -aG docker ssm-user
+```
+
+> **Note:** Group membership applies to **new** logins. Exit and re-open the SSM session after running these commands to use `docker` without `sudo`.
+
+```bash
 # kubectl
 cd /tmp
 curl -LO "https://s3.us-west-2.amazonaws.com/amazon-eks/1.35.2/2026-02-27/bin/linux/amd64/kubectl"

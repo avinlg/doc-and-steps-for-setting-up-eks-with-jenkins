@@ -70,7 +70,43 @@ systemctl start docker
 mkdir -p /opt/jenkins_home
 chown -R 1000:1000 /opt/jenkins_home
 
-docker pull jenkins/jenkins:lts-jdk21
+# Build custom Jenkins image with Docker CLI, AWS CLI, kubectl, and Helm baked in
+mkdir -p /opt/jenkins-build
+cat > /opt/jenkins-build/Dockerfile <<'DOCKERFILE'
+FROM jenkins/jenkins:lts-jdk21
+
+USER root
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    unzip \
+    git \
+    ca-certificates \
+    gnupg \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+# AWS CLI v2
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" \
+    && unzip /tmp/awscliv2.zip -d /tmp \
+    && /tmp/aws/install \
+    && rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# kubectl 1.35.2
+RUN curl -fsSL -o /usr/local/bin/kubectl \
+    "https://s3.us-west-2.amazonaws.com/amazon-eks/1.35.2/2026-02-27/bin/linux/amd64/kubectl" \
+    && chmod +x /usr/local/bin/kubectl
+
+# Helm
+RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+RUN groupadd -f -r docker
+
+USER jenkins
+DOCKERFILE
+docker build -t jenkins-custom:latest /opt/jenkins-build
+
+DOCKER_GID=$(getent group docker | cut -d: -f3)
 
 docker run -d \
   --name jenkins \
@@ -79,7 +115,8 @@ docker run -d \
   -p 50000:50000 \
   -v /opt/jenkins_home:/var/jenkins_home \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  jenkins/jenkins:lts-jdk21
+  --group-add "$DOCKER_GID" \
+  jenkins-custom:latest
 EOF
 ```
 
@@ -127,9 +164,9 @@ aws ssm describe-instance-information \
   --query "InstanceInformationList[?InstanceId=='$JENKINS_INSTANCE_ID']"
 ```
 
-## 5.3 Install Tools on Jenkins Host
+## 5.3 Configure Docker Access on Jenkins Host
 
-SSM into the instance and install kubectl and Helm:
+SSM into the instance:
 
 ```bash
 aws ssm start-session \
@@ -137,11 +174,9 @@ aws ssm start-session \
   --target $JENKINS_INSTANCE_ID
 ```
 
-Inside the session:
+Allow ec2-user and ssm-user to run docker without sudo:
 
 ```bash
-# Allow ec2-user and the SSM session user to run docker without sudo.
-# ssm-user is created on first SSM session; ensure it exists, then add both.
 sudo getent group docker >/dev/null || sudo groupadd docker
 id -u ssm-user >/dev/null 2>&1 || sudo useradd -m ssm-user
 sudo usermod -aG docker ec2-user
@@ -150,20 +185,7 @@ sudo usermod -aG docker ssm-user
 
 > **Note:** Group membership applies to **new** logins. Exit and re-open the SSM session after running these commands to use `docker` without `sudo`.
 
-```bash
-# kubectl
-cd /tmp
-curl -LO "https://s3.us-west-2.amazonaws.com/amazon-eks/1.35.2/2026-02-27/bin/linux/amd64/kubectl"
-curl -LO "https://s3.us-west-2.amazonaws.com/amazon-eks/1.35.2/2026-02-27/bin/linux/amd64/kubectl.sha256"
-sha256sum -c kubectl.sha256
-chmod +x kubectl
-sudo mv kubectl /usr/local/bin/kubectl
-kubectl version --client
-
-# Helm
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm version
-```
+> **Note:** kubectl, Helm, AWS CLI, and Docker CLI are pre-installed inside the custom Jenkins container (see `scripts/Jenkins/Dockerfile`).
 
 ## 5.4 Create Target Group
 
